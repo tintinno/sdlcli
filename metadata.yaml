@@ -1,0 +1,129 @@
+##################################
+# default metadata file for sdl
+##################################
+
+default:
+  lang: en-US
+  releasedStatus: Generic-Released
+  draftStatus: Generic-In progress
+
+##################################
+# metadata for publications
+##################################
+
+pub:
+  FTITLE:
+    level: logical
+    desc: publication title
+  FDESCRIPTION:
+    level: logical
+    desc: description
+  FISHPUBLICATIONTYPE:
+    level: logical
+    desc: publication type
+  VERSION:
+    level: version
+    desc: publication version
+  DOC-LANGUAGE:
+    level: lng
+    desc: lang
+  FREQUESTEDLANGUAGES:
+    level: version
+    desc: requested languages
+  FISHPUBSOURCELANGUAGES:
+    level: version
+    desc: source language
+  FISHMASTERREF:
+    level: version
+    desc: bookmap guid
+  FISHRESOURCES:
+    level: version
+    desc: resources
+  FISHREQUIREDRESOLUTIONS:
+    level: version
+    desc: required resolutions
+  FISHOUTPUTFORMATREF:
+    level: lng
+    desc: name of the output 
+  FISHPUBCONTEXT:
+    level: version
+    desc: condition
+  FCHANGES:
+    level: version
+    desc: baseline-specific changes
+  # add your company-specific metadata
+  #FIELD-NAME-IN-ALL-CAPS
+    #level: Enter the metadata level (logical, version, lng)
+    #desc: Enter a description of this field
+
+##################################
+# metadata for documents
+##################################
+
+doc:
+  FTITLE:
+    level: logical 
+    desc: title of the document
+  FDESCRIPTION:
+    level: logical 
+    desc: description
+  FCHANGES:
+    level: version 
+    desc: changes to this version 
+  CREATED-ON:
+    level: logical 
+    desc: date created
+  MODIFIED-ON:
+    level: logical 
+    desc: last modified
+  FUSERGROUP:
+    level: logical 
+    desc: user group
+  VERSION:
+    level: version 
+    desc: version
+  DOC-LANGUAGE:
+    level: lng 
+    desc: language
+  CREATED-ON:
+    level: lng 
+    desc: date created 
+  FISHREVCOUNTER:
+    level: lng 
+    desc: 
+  FSTATUS:
+    level: lng 
+    desc: status
+  FISHSTATUSTYPE:
+    level: lng 
+    desc: status type
+  CHECKED-OUT-BY:
+    level: lng 
+    desc: checked out by 
+  FISHLINKS:
+    level: lng 
+    desc: contains links to
+  FISHIMAGELINKS:
+    level: lng 
+    desc: contains links to images
+  FISHHYPERLINKS:
+    level: lng 
+    desc: hyper links
+  FISHREUSABLEOBJECTS:
+    level: lng 
+    desc:
+  FISHFRAGMENTLINKS:
+    level: lng 
+    desc:
+  FISHTARGETS:
+    level: lng 
+    desc: targets
+  FISHVARASSIGNED:
+    level: lng 
+    desc: variable assigned
+  FISHVARINUSE:
+    level: lng 
+    desc: variable in use
+  FISHCONDITIONS:
+    level: lng
+    desc: conditions
