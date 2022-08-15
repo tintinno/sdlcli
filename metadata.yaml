@@ -52,6 +52,9 @@ pub:
     level: version
     desc: baseline-specific changes
   # add your company-specific metadata
+  #FPARTNUMBER:
+  #  level: version
+  #  desc: the part number for this publication
   #FIELD-NAME-IN-ALL-CAPS
     #level: Enter the metadata level (logical, version, lng)
     #desc: Enter a description of this field

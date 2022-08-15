@@ -1,0 +1,756 @@
+#!/usr/bin/python3
+#
+# sdl - command line interface to SDL
+
+from time import strftime, localtime
+from zeep import Client
+from lxml import etree
+import subprocess
+import argparse
+import getpass
+import base64
+import netrc
+import zeep
+import yaml
+import stat
+import sys
+import re
+import os
+
+# unset http[s] proxies because these are the worst: if you're not on VPN, you
+# can't reach the repo anyway; if you are on VPN, you don't need to proxy this
+# traffic through the corporate proxy since it already routes through the VPN
+os.environ['http_proxy']  = ''
+os.environ['https_proxy'] = ''
+
+# we need to know the home directory so we can set some other variables
+HOME    = os.environ['HOME']
+LOGFILE = HOME + '/.sdlcms/sdl.log'
+MDFILE  = HOME + '/.sdlcms/metadata.yaml'
+
+# record successful commands
+def writeLog(msg):
+    with open(LOGFILE,'a') as out:
+        tstamp = strftime("%Y-%m-%d %H:%M:%S", localtime())
+        outs = "[" + tstamp + "] " + msg + "\n"
+        out.write(outs)
+
+# when we print the xml to the screen, let's make it pretty
+def cprint(xmls, nocolor):
+    # todo: test this in Cygwin
+    if not os.path.exists("/usr/bin/source-highlight"):
+        print("Install source-highlight to view this file in the terminal")
+        print("- CentOS: yum install source-highlight")
+        print("- Ubuntu: apt install source-highlight")
+        raise SystemExit(5)
+
+    with open('/tmp/sdl-temp-file.xml','w') as out:
+        out.write(xmls)
+    if nocolor:
+        args = ['/bin/cat',
+            '/tmp/sdl-temp-file.xml'
+           ]
+    else:
+        args = ['/usr/bin/source-highlight',
+            '-i',
+            '/tmp/sdl-temp-file.xml',
+            '-f',
+            'esc'
+           ]
+    subprocess.call(args)
+
+# SDL CLASS
+class SDL(object):
+
+    # generic init
+    def __init__(self):
+        parser = argparse.ArgumentParser(
+            usage='''sdl <mgmttype> <command> [<args>]
+
+Management types:
+  doc        Manage a document
+  pub        Manage a publication
+  dir        Manage a directory''')
+        parser.add_argument('mgmttype', help=argparse.SUPPRESS)
+        args = parser.parse_args(sys.argv[1:2])
+
+        # when we create an object, load the metadata.yaml if it exists
+        if not os.path.isfile(MDFILE):
+            raise SystemExit('Run the installation script `install.py`.')
+        with open(MDFILE,'r') as f:
+            mddata = yaml.load(f.read(), Loader=yaml.SafeLoader)
+        self.mddata = mddata
+        self.lang   = mddata['default']['lang']
+        self.releasedStatus = mddata['default']['releasedStatus']
+        self.draftStatus = mddata['default']['draftStatus']
+       
+        # call the management-type functions
+        if not hasattr(self, args.mgmttype):
+            print('Invalid management type')
+            parser.print_help()
+            exit(1)
+        else:
+            getattr(self, args.mgmttype)()
+    
+    # authenticate and store the token within the object so we can find it later
+    def authenticate(self):
+        SDLRC = HOME + '/.sdlcms/.sdlrc'
+        with open(SDLRC,'r') as f:
+            auth = yaml.load(f.read(), Loader=yaml.SafeLoader)
+        username = auth['user']
+        password = auth['pass']
+        hostname = auth['host']
+        self.hostname = hostname
+        client = Client(self.hostname + 'Application25.asmx?wsdl')
+        resp = client.service.Login('InfoShareAuthor', username, password)
+        self.token = resp['psOutAuthContext']
+
+    # generic parse response
+    def getValueFromResponse(self, xmls, xpath, number):
+        xmlb = xmls.encode('utf16')
+        tree = etree.fromstring(xmlb)
+        if number == 'first':
+            value = tree.xpath(xpath)[0]
+        elif number == 'all':
+            value = tree.xpath(xpath)
+        return value
+
+    # generic build requestedmetadata 
+    # kind == 'doc' or 'pub'
+    def buildRequestedMetadata(self, mdList, kind, includeVersion, argLevel):
+        outs = '<ishfields>\n<ishfield name="FTITLE" level="logical" ishvaluetype="value"/>\n'
+        if includeVersion:
+            outs += '<ishfield name="VERSION" level="version" ishvaluetype="value"/>\n'
+        for md in mdList:
+            if argLevel:
+                level = argLevel
+            else:
+                level = self.mddata[kind][md]['level']
+            outs += '<ishfield name="%s" level="%s" ishvaluetype="value"/>\n' % (md, level)
+            outs += '<ishfield name="%s" level="%s" ishvaluetype="element"/>\n' % (md, level)
+        outs += "</ishfields>"
+        return outs
+
+    # TOP-LEVEL SETUP
+    def setup(self):
+        if not os.path.isdir(HOME + '/.sdlcms'):
+            os.mkdir(HOME + '/.sdlcms')
+        SDLRC = HOME + '/.sdlcms/.sdlrc'
+        hostname = input("Enter the SDL URL [https://example.com/InfoShareWS/]: ")
+        username = input("Enter your SDL username: ")
+        password = getpass.getpass(prompt='Enter your SDL password: ', stream=None)
+        outauth = {"user":username, "pass":password, "host":hostname}
+        # write out as YAML
+        with open(SDLRC,'w') as out:
+            yaml.dump(outauth, out, default_flow_style=False)
+        
+        # set file permissions
+        os.chmod(SDLRC, stat.S_IRUSR | stat.S_IWUSR)
+        os.chmod(MDFILE, stat.S_IRUSR | stat.S_IWUSR)
+
+    # TOP-LEVEL MANAGEMENT TYPES: doc, pub, dir
+    def doc(self):
+        parser = argparse.ArgumentParser(
+            usage='''sdl doc <command> [<args>] 
+
+Commands:
+    showmd      Show the available metadata fields
+    getmd       Get metadata for a document (topic,map,image)
+    setmd       Set metadata for a document (topic,map,image)
+    getxml      Get the XML of a document (topic,map)''')
+        parser.add_argument('command', help='Subcommand to run')
+        args = parser.parse_args(sys.argv[2:3])
+
+        if not hasattr(self, "doc_" + args.command):
+            print('Invalid command for a document')
+            parser.print_help()
+            exit(2)
+        else:
+            getattr(self, "doc_" + args.command)()
+
+    def pub(self):
+        parser = argparse.ArgumentParser(
+            usage='''sdl pub <command> [<args>] 
+
+Commands:
+    showmd      Show the available metadata fields
+    getmd       Get metadata for a publication
+    setmd       Set metadata for a publication
+    getpath     Get the path of a publication
+    getbl       Get a list of GUIDs and versions in the baseline
+    release     Release all topics in a publication version''')
+        parser.add_argument('command', help=argparse.SUPPRESS)
+        args = parser.parse_args(sys.argv[2:3])
+
+        if not hasattr(self, "pub_" + args.command):
+            print('Invalid command')
+            parser.print_help()
+            exit(2)
+        else:
+            getattr(self, "pub_" + args.command)()
+    
+    def dir(self):
+        parser = argparse.ArgumentParser(
+            usage='''sdl dir <options> <path> 
+
+Options:
+    folders     List the subfolders of a folder
+    files       List the contents of a folder''')
+        parser.add_argument('option', help=argparse.SUPPRESS)
+        args = parser.parse_args(sys.argv[2:3])
+
+        if not hasattr(self, "dir_" + args.option):
+            print('Invalid command')
+            parser.print_help()
+            exit(2)
+        else:
+            getattr(self, "dir_" + args.option)()
+    
+    # SUB-COMMANDS
+    #   doc_* functions for DocumentObj
+    #   pub_* functions for PublicationObj and Baseline
+    #   dir_*  functions for Folder
+
+    # DOCUMENT FUNCTIONS
+    def doc_showmd(self):
+        print(" %-25s | %-10s | %s" % ("Field Name", "Level", "Description"))
+        print("-%-25s-+-%-10s-+-%s" % ("-"*25, "-"*10, "-"*25) )
+        for field in self.mddata['doc']:
+            level = self.mddata['doc'][field]['level']
+            desc  = self.mddata['doc'][field]['desc']
+            print(" %-25s | %-10s | %s" % (field, level, desc))
+
+        raise SystemExit()
+   
+    def doc_downloadXML(self, prog, guid, version, outfile, nocolor):
+        requestedMetadata = """<ishfields>
+          <ishfield name="FTITLE" level="logical" ishvaluetype="value"/>
+        </ishfields>"""
+
+        docclient = Client(self.hostname + 'DocumentObj25.asmx?wsdl')
+        try:
+            resp = docclient.service.GetObject(self.token, guid, version, self.lang, '', '', requestedMetadata)
+        except Exception as e:
+            raise SystemExit(e)
+        xmls = resp['psOutXMLObjList']
+        xmls = xmls.replace('<?xml version="1.0" encoding="utf-16"?>','')
+        tree = etree.fromstring(xmls)
+        encc = tree.xpath("//ishdata")[0].text
+        bxml = base64.b64decode(encc)
+        # TODO: if the GUID is actually an image, this fails
+        xml  = bxml.decode("utf16")
+        xml  = xml.replace('<?xml version="1.0" encoding="utf-16"?>','')
+        parser = etree.XMLParser(remove_blank_text=True)
+        tree = etree.fromstring(xml.encode("utf16"), parser)
+        xml  = etree.tostring(tree, pretty_print=True)
+        outs = xml.decode("utf-8")
+        writeLog('doc %s: "guid":"%s", "version":"%s", "outfile":"%s"' % (prog, guid, version, outfile))
+        if outfile:
+            with open(outfile, 'w') as out:
+                out.write(outs)
+        else:
+            cprint(outs, nocolor)
+
+    def doc_getxml(self):
+        parser = argparse.ArgumentParser(description='Get the XML of a document',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID of document',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version of document',metavar='')
+        parser.add_argument('-o','--outfile', action='store',help='File to save output',metavar='')
+        parser.add_argument('-n','--nocolor', action='store_true',help='Do not colorize output')
+        args = parser.parse_args(sys.argv[3:])
+        
+        # authenticate
+        self.authenticate()
+        self.doc_downloadXML('getxml', args.guid, args.version, args.outfile, args.nocolor)
+
+    def doc_checkout(self):
+        parser = argparse.ArgumentParser(description='Checkout a document',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID of document',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version of document',metavar='')
+        parser.add_argument('-o','--outfile', action='store',help='File to check out',metavar='')
+        args = parser.parse_args(sys.argv[3:])
+        
+        # authenticate
+        self.authenticate()
+        if args.outfile:
+            outfile = args.outfile
+        else:
+            outfile = args.guid + '.xml'
+            print("Setting check out file to %s" % outfile)
+        self.doc_downloadXML('checkout', args.guid, args.version, outfile)
+        docclient = Client(self.hostname + 'DocumentObj25.asmx?wsdl')
+
+        # TODO: if current version is released, create a new version
+        
+        try:
+            resp = docclient.service.CheckOut(self.token, args.guid, args.version, self.lang, '', '', '')
+            print("Checked out.")
+        except Exception as e:
+            raise SystemExit(e)
+
+    def doc_checkin(self):
+        parser = argparse.ArgumentParser(description='Checkin a document',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID of document',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version of document',metavar='')
+        parser.add_argument('-f','--file', action='store',help='File to check in',metavar='')
+        args = parser.parse_args(sys.argv[3:])
+        
+        # authenticate
+        self.authenticate()
+    
+    def doc_undocheckout(self):
+        parser = argparse.ArgumentParser(description='Undo the check-out of a document',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID of document',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version of document',metavar='')
+        args = parser.parse_args(sys.argv[3:])
+        
+        # authenticate
+        self.authenticate()
+        docclient = Client(self.hostname + 'DocumentObj25.asmx?wsdl')
+        try:
+            resp = docclient.service.UndoCheckOut(self.token, args.guid, args.version, self.lang,'','')
+            print("Success")
+        except Exception as e:
+            raise SystemExit(e)
+
+    def doc_getmd(self):
+        parser = argparse.ArgumentParser(description='Get metadata about a document',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID ',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version',metavar='')
+        parser.add_argument('-f','--field', action='store',help='Metadata field',metavar='')
+        parser.add_argument('-l','--level', action='store',help='Metadata level',metavar='')
+        args = parser.parse_args(sys.argv[3:])
+        args.field = args.field.upper()
+        
+        # authenticate
+        self.authenticate()
+
+        # if multiple arguments were passed in a comma-separated list, convert to a list
+        fieldList = args.field.split(',')
+        requestedMetadata = self.buildRequestedMetadata(fieldList, 'doc', False, args.level)
+        
+        docclient = Client(self.hostname + 'DocumentObj25.asmx?wsdl')
+        try:
+            resp = docclient.service.GetMetaData(self.token, args.guid, args.version, self.lang, "", requestedMetadata, "")
+        except zeep.exceptions.Fault:
+            raise SystemExit("ERROR: This version of this document does not exist.")
+        xmls = resp['psOutXMLObjList']
+        xmls = xmls.replace('<?xml version="1.0" encoding="utf-16"?>','')
+        tree = etree.fromstring(xmls)
+        value = ''
+        try:
+            for field in fieldList:
+                level = self.mddata['doc'][field]['level']
+                value = tree.xpath("//ishfield[@name='%s']/text()" % field)[0]
+                #print("%s = '%s'" % (field, value))
+                print(value)
+                writeLog('doc getmd: "guid":"%s", "version":"%s", "field":"%s", "level":"%s", "value":"%s"' % (args.guid, args.version, field, level, value))
+        except:
+            pass
+    
+    def doc_setmd(self):
+        parser = argparse.ArgumentParser(description='Set metadata for a document',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID ',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version',metavar='')
+        parser.add_argument('-f','--field', action='store',help='Metadata field',metavar='')
+        parser.add_argument('-l','--level', action='store',help='Metadata level',metavar='')
+        parser.add_argument('-n','--newvalue', action='store',help='Metadata level',metavar='')
+        args = parser.parse_args(sys.argv[3:])
+        args.field = args.field.upper()
+        
+        # authenticate
+        self.authenticate()
+        
+        # lookup the default level if not provided
+        if not args.level:
+            args.level = self.mddata['doc'][args.field]['level']
+            #writeLog("INFO: sdl doc setmd: setting default level of %s to %s" % (args.field, args.level))
+       
+        metadata = """<ishfields>
+        <ishfield name="%s" level="%s" ishvaluetype="value">%s</ishfield>
+        </ishfields>""" % ( args.field, args.level, args.newvalue )
+        
+        docclient = Client(self.hostname + 'DocumentObj25.asmx?wsdl')
+        writeLog('doc setmd: "guid":"%s", "version":"%s", "field":"%s", "level":"%s", "newvalue":"%s"' % (args.guid, args.version, args.field, args.level, args.newvalue))
+        try:
+            resp = docclient.service.SetMetadata(self.token, args.guid, args.version, self.lang, "", metadata, "")
+            print("success")
+        except zeep.exceptions.Fault:
+            raise SystemExit("SDL error: %s" % e.message)
+        except Exception as e:
+            raise SystemExit("Some other SDL error: %s" % e.message)
+
+    # PUBLICATION FUNCTIONS
+    def pubGetOutputType(self, guid, version):
+        # this returns only the first OutputType
+        rmd = '''<ishfields>
+          <ishfield name="FISHOUTPUTFORMATREF" level="lng"/>
+        </ishfields>'''
+        mdf = '''<ishfields>
+          <ishfield name="VERSION" level="version">%s</ishfield>
+        </ishfields>''' % version
+        pubclient = Client(self.hostname + 'PublicationOutput25.asmx?wsdl')
+        resp = pubclient.service.RetrieveMetadata(self.token, {'string':guid},'ISHNoStatusFilter', mdf, rmd )
+        outputType = self.getValueFromResponse(resp.psOutXMLObjList, "//ishfield[@name = 'FISHOUTPUTFORMATREF']/text()", "first") 
+        return outputType
+
+    def pub_showmd(self):
+        print(" %-25s | %-10s | %s" % ("Field Name", "Level", "Description"))
+        print("-%-25s-+-%-10s-+-%s" % ("-"*25, "-"*10, "-"*25) )
+        for field in self.mddata['pub']:
+            level = self.mddata['pub'][field]['level']
+            desc  = self.mddata['pub'][field]['desc']
+            print(" %-25s | %-10s | %s" % (field, level, desc))
+
+        raise SystemExit()
+
+    def pub_getpath(self):
+        parser = argparse.ArgumentParser(description='Get the repository path of a publication',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID of publication',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version of publication',metavar='')
+        args = parser.parse_args(sys.argv[3:])
+        
+        # variables
+        guid = args.guid
+        version = args.version
+        namexpath = "//ishobject[@ishref = '%s']/ishfields/ishfield[@name = 'FTITLE']/text()" % args.guid
+       
+        # create pubclient
+        self.authenticate()
+        pubclient = Client(self.hostname + 'PublicationOutput25.asmx?wsdl')
+
+        folder = pubclient.service.FolderLocation(self.token, guid, 'Data')
+        outpath = "/".join(folder['pasOutFolderPath']['string'])
+        # get the name      
+        mdf = '''<ishfields>
+          <ishfield name="VERSION" level="version">%s</ishfield>
+        </ishfields>''' % version
+        requestedMetadata = """<ishfields>
+        <ishfield name="FTITLE" level="logical" ishvaluetype="value"/>
+        </ishfields>"""
+        resp = pubclient.service.Find(self.token, 'ISHNoStatusFilter', mdf, requestedMetadata)
+        name = self.getValueFromResponse(resp.psOutXMLObjList, namexpath, 'first')
+        outpath += '/' + name
+        print(outpath)
+        writeLog('pub getpath: "guid":"%s", "version":"%s", "path":"%s"' % (guid, version, outpath))
+
+    def pub_getbl(self):
+        parser = argparse.ArgumentParser(description='Get the baseline (GUIDs and versions) of a publication',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID of publication',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version of publication',metavar='')
+        parser.add_argument('-o','--outfile', action='store',help='Output file',metavar='')
+        parser.add_argument('-d','--drafts', action='store_true',help='Do not print topics in Released state')
+        args = parser.parse_args(sys.argv[3:])
+        outfile = args.outfile
+        draftOnly = args.drafts
+
+        # variables
+        guid = args.guid
+        version = args.version
+        pubrmd = '''<ishfields>
+          <ishfield name="FISHBASELINE" level="version" ishvaluetype="element"/> 
+        </ishfields>'''
+        blrmd = '' 
+        docrmd = '''<ishfields>
+          <ishfield name="FTITLE" level="logical" /> 
+          <ishfield name="VERSION" level="version" /> 
+          <ishfield name="FSTATUS" level="lng" /> 
+        </ishfields>'''
+
+        
+        # clients
+        self.authenticate()
+        pubclient = Client(self.hostname + 'PublicationOutput25.asmx?wsdl')
+        blclient  = Client(self.hostname + 'Baseline25.asmx?wsdl')
+        docclient = Client(self.hostname + 'DocumentObj25.asmx?wsdl')
+
+        # get the baselineid from the publication
+        pubresp = pubclient.service.RetrieveVersionMetadata(self.token, {'string':[guid]}, version, pubrmd, '')
+        blid    = self.getValueFromResponse(pubresp.psOutXMLObjList, "//ishfield[@name = 'FISHBASELINE' and @ishvaluetype = 'element' ]/text()", 'first')
+        # get the baseline
+        blresp  = blclient.service.GetBaseline(self.token, blid, blrmd, '', '')
+        # to make this useful, we also need the titles 
+        guids   = self.getValueFromResponse(blresp.psOutXMLBaseline, "//object/@ref", 'all')
+        docresp = docclient.service.RetrieveMetadata(self.token, {'string':guids}, 'ISHNoStatusFilter', '', docrmd, '')
+
+        if outfile:
+            outs = "Baseline ID = '%s'\n" % blid
+        else:
+            print("Baseline ID = '%s'" % blid)
+        xmls = blresp.psOutXMLBaseline
+        xmlb = xmls.encode('utf16')
+        tree = etree.fromstring(xmlb)
+
+        # table header and table divider
+        if outfile:
+            outs += " %-41s | %-7s | %-19s | %-19s | %-19s | %s\n" % ("GUIDs", "Version", "Created", "Last Modified", "Status", "Title")
+            outs += " %-41s-+-%-7s-+-%-19s-+-%-19s-+-%-19s-+-%s\n" % ("-"*41, "-"*7, "-"*19, "-"*19, "-"*19, "-"*30)
+            with open(outfile, "w") as out:
+                out.write(outs)
+        else:
+            print(" %-41s | %-7s | %-19s | %-19s | %-19s | %s" % ("GUIDs", "Version", "Created", "Last Modified", "Status", "Title")) 
+            print(" %-41s-+-%-7s-+-%-19s-+-%-19s-+-%-19s-+-%s" % ("-"*41, "-"*7, "-"*19, "-"*19, "-"*19, "-"*30))               
+
+        for obj in tree.xpath("//object"):
+            docguid = obj.xpath("./@ref")[0]
+            docver  = obj.xpath("./@versionnumber")[0]
+            doccre  = obj.xpath("./@created")[0]
+            docmod  = obj.xpath("./@modified")[0]
+            docauth = obj.xpath("./@author")[0]
+            titlexpath  = "//ishobject[@ishref = '%s' and ishfields/ishfield[@name = 'VERSION']/text() = '%s']/ishfields/ishfield[@name='FTITLE']/text()" % (docguid, docver)
+            statusxpath = "//ishobject[@ishref = '%s' and ishfields/ishfield[@name = 'VERSION']/text() = '%s']/ishfields/ishfield[@name='FSTATUS']/text()" % (docguid, docver)
+            doctitle = self.getValueFromResponse(docresp.psOutXMLObjList, titlexpath, "first")
+            status   = self.getValueFromResponse(docresp.psOutXMLObjList, statusxpath, "first")
+           
+            # if draftOnly flag is set and if this topic is Release, then skip to the next one 
+            if draftOnly and status == self.releasedStatus:
+                continue
+
+            if outfile:
+                outline = " %-41s | %-7s | %-19s | %-19s | %-19s | '%s'" % (docguid, docver, doccre, docmod, status, doctitle)
+                with open(outfile, "a") as out:
+                    out.write(outline + '\n')
+            else:
+                print(" %-41s | %-7s | %-19s | %-19s | %-19s | '%s'" % (docguid, docver, doccre, docmod, status, doctitle))
+
+    def pub_getmd(self):
+        parser = argparse.ArgumentParser(description='Get metadata of a publication',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID of publication',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version of publication',metavar='')
+        parser.add_argument('-f','--field', action='store',help='Metadata field ',metavar='')
+        parser.add_argument('-l','--level', action='store',help='Metadata level',metavar='')
+        parser.add_argument('-e','--element', action='store_true',help='Return valueType = "element" rather than default "value"',dest='element')
+        args = parser.parse_args(sys.argv[3:])
+        args.field = args.field.upper()
+       
+        # variables
+        guid    = args.guid
+        version = args.version
+        mdfield = args.field
+        mdfield = mdfield.upper()
+        mdlevel = args.level
+       
+        # authenticate
+        self.authenticate()
+        
+        # if multiple arguments were passed in a comma-separated list, convert to a list
+        fieldList = args.field.split(',')
+        requestedMetadata = self.buildRequestedMetadata(fieldList, 'pub', True, args.level)
+        
+        pubclient = Client(self.hostname + 'PublicationOutput25.asmx?wsdl')
+        outputType = self.pubGetOutputType(guid, version)
+        # get the metadata
+        resp = pubclient.service.GetMetaData(self.token, guid, version, outputType, self.lang, requestedMetadata)
+        # get the value of the response
+        elem  = self.getValueFromResponse(resp.psOutXMLObjList, "//ishfield[@name = '%s']" % mdfield, 'first')
+        value = self.getValueFromResponse(resp.psOutXMLObjList, "//ishfield[@name = '%s']/text()" % mdfield, 'all')
+
+        if args.element:
+            print(value[1])
+        else:
+            print(value[0])
+        writeLog('pub getmd: "guid":"%s", "version":"%s", "field":"%s", "level":"%s", "value":"%s"' % (guid, version, mdfield, mdlevel, value))
+
+    def pub_setmd(self):
+        parser = argparse.ArgumentParser(description='Set metadata for a publication',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID of publication',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version of publication',metavar='')
+        parser.add_argument('-f','--field', action='store',help='Metadata field ',metavar='')
+        parser.add_argument('-l','--level', action='store',help='Metadata level',metavar='')
+        parser.add_argument('-n','--newvalue', action='store',help='New value for metadata field',metavar='')
+        args = parser.parse_args(sys.argv[3:])
+        args.field = args.field.upper()
+        
+        # lookup the default level if not provided
+        if not args.level:
+            args.level = self.mddata['pub'][args.field]['level']
+            #writeLog("INFO: sdl pub setmd: setting default level of %s to %s" % (args.field, args.level))
+       
+        guid    = args.guid
+        version = args.version
+        mdfield = args.field
+        mdlevel = args.level
+        mdvalue = args.newvalue
+
+        if not guid or not version or not mdfield or not mdlevel or not mdvalue:
+            print("Invalid arguments")
+            raise SystemExit()
+
+        # authenticate
+        self.authenticate()
+        
+        pubclient = Client(self.hostname + 'PublicationOutput25.asmx?wsdl')
+        outputType = self.pubGetOutputType(guid, version)
+
+        metadata = '''<ishfields>
+          <ishfield name="%s" level="%s">%s</ishfield>
+        </ishfields>''' % (mdfield, mdlevel, mdvalue)
+
+        resp = pubclient.service.SetMetadata(self.token, guid, version, outputType, self.lang, metadata, '')
+        print("success")
+        writeLog('pub setmd: "guid":"%s", "version":"%s", "field":"%s", "level":"%s", "newvalue":"%s"' % (guid, version, mdfield, mdlevel, mdvalue))
+
+    def pub_release(self):
+        parser = argparse.ArgumentParser(description='Release all topics within a publication version',usage=argparse.SUPPRESS)
+        parser.add_argument('-g','--guid', action='store',help='GUID of publication',metavar='')
+        parser.add_argument('-v','--version', action='store',help='Version of publication',metavar='')
+        args = parser.parse_args(sys.argv[3:])
+        # local variables
+        guid = args.guid
+        version = args.version
+        # authenticate
+        self.authenticate()
+
+        writeLog('pub release: "guid":"%s", "version":"%s"' % (guid, version))
+        # get the baseline id for this version of the publication
+        pubrmd = '''<ishfields>
+          <ishfield name="FISHBASELINE" level="version" ishvaluetype="element"/>
+        </ishfields>''' 
+        pubclient = Client(self.hostname + 'PublicationOutput25.asmx?wsdl')
+        resp = pubclient.service.RetrieveVersionMetadata(self.token, {'string':guid}, version, pubrmd, '')
+        blid = self.getValueFromResponse(resp.psOutXMLObjList, "//ishfield[@name = 'FISHBASELINE' and @ishvaluetype = 'element']/text()", "first")
+        
+        # get the list of topics and versions within this baseline id
+        rmd = '''<ishfields>
+        <ishfield name="FTITLE" level="logical" />
+        <ishfield name="VERSION" level="version" />
+        <ishfield name="FSTATUS" level="lng" />
+        </ishfields>''' 
+        blclient = Client(self.hostname + 'Baseline25.asmx?wsdl')
+        resp  = blclient.service.GetBaseline(self.token, blid, '', '', '')
+        guids = self.getValueFromResponse(resp.psOutXMLBaseline, "//object/@ref", "all")
+        guidVersion = {}
+        for guid in guids:
+            guidVersion[guid] = self.getValueFromResponse(resp.psOutXMLBaseline, "//object[@ref = '%s']/@versionnumber" % guid, "first")
+        
+        # get the FSTATUS of each of those guids and build the list of unreleased topics (by ishlngref)
+        docclient = Client(self.hostname + 'DocumentObj25.asmx?wsdl')
+        resp = docclient.service.RetrieveMetadata(self.token, {'string':guids}, 'ISHNoStatusFilter', '', rmd, '')
+        allishlngrefs = []
+        updatedDocs   = []
+        for guid in guids:
+            version = guidVersion[guid]
+            lngxpath = "//ishobject[@ishref = '%s' and ishfields/ishfield[@name = 'VERSION']/text() = '%s' and ishfields/ishfield[@name = 'FSTATUS']/text() = 'Generic-In progress' ]/@ishlngref" % (guid, version)
+            titlexpath = "//ishobject[@ishref = '%s' and ishfields/ishfield[@name = 'VERSION']/text() = '%s' and ishfields/ishfield[@name = 'FSTATUS']/text() = 'Generic-In progress' ]/ishfields/ishfield[@name = 'FTITLE']/text()" % (guid, version)
+            ishlngrefs = self.getValueFromResponse(resp.psOutXMLObjList, lngxpath, "all")
+            title = self.getValueFromResponse(resp.psOutXMLObjList, titlexpath, "all")
+            if len(ishlngrefs) > 0:
+                allishlngrefs.append(int(ishlngrefs[0]))
+            if len(title) > 0:
+                updatedDocs.append([guid, version, title[0]])
+
+        # now set all those ishlngrefs to released
+        md = '''<ishfields>
+        <ishfield name="FSTATUS" level="lng">Generic-Released</ishfield>
+        </ishfields>''' 
+        # when we make this call, get the raw response because we want to check the status_code
+        with docclient.settings(raw_response=True):
+            resp = docclient.service.SetMetadataByIshLngRefs(self.token, {'long':allishlngrefs}, md, '' )
+        if resp.status_code != 200:
+            print("Error: got response code %i\n\tfor SetMetadataByIshLngRefs with\n\tallishlngrefs = %s)" % (resp.status_code, str(allishlngrefs)))
+        else:
+            for doc in updatedDocs:
+                writeLog("pub release: Released %s v%s '%s'" % (doc[0], doc[1], doc[2]))
+                print("Released %s v%s '%s'" % (doc[0], doc[1], doc[2]))
+        
+    # ls functions
+    def alphabetizeGuidsByTitle(self, guids, ishtype):
+        # metadata we need to sort and display
+        requestedMetadata = """<ishfields>
+        <ishfield name="FTITLE" level="logical" ishvaluetype="value"/>
+        <ishfield name="VERSION" level="version" ishvaluetype="value"/>
+        </ishfields>"""
+
+        # either we're sorting topics or publications
+        if ishtype in ("ISHModule", "ISHMasterDoc", "ISHIllustration"):
+            client = Client(self.hostname + 'DocumentObj25.asmx?wsdl')
+        elif ishtype == "ISHPublication":
+            client = Client(self.hostname + 'PublicationOutput25.asmx?wsdl')
+        else:
+            raise SystemExit("uncaught ishtype: %s" % ishtype)
+
+        # both DocumentObj and PublicationOutput have the RetrieveVersionMetadata method
+        resp = client.service.RetrieveVersionMetadata(self.token, {'string':guids}, 'latest', requestedMetadata)
+        xmls = resp.psOutXMLObjList
+        xmlb = xmls.encode('utf16')
+        tree = etree.fromstring(xmlb)
+        outlist = []
+        for ishobject in tree.xpath("//ishobject"):
+            guid = ishobject.xpath("./@ishref")[0]
+            name = ishobject.xpath("./ishfields/ishfield[@name = 'FTITLE']/text()")[0]
+            ver  = ishobject.xpath("./ishfields/ishfield[@name = 'VERSION']/text()")[0]
+            outlist.append([name, guid, ver])
+        outlist = sorted(outlist, key=lambda x: x[0]) # sort list by title
+        return outlist 
+  
+    def lsFolderPrintContents(self, xmls, folder):
+        xmlb = xmls.encode('utf16')
+        tree = etree.fromstring(xmlb)
+        if tree.xpath("//ishfolder/ishfolder"):
+            print("Subfolders of '%s':" % folder)
+        else:
+            print("No subfolders found.")
+        for ishfolder in tree.xpath("//ishfolder")[1:]:     # exclude the first self-referential ishfolder
+            ishfolderref = ishfolder.xpath("@ishfolderref")
+            name = ishfolder.xpath("./ishfields/ishfield[@name='FNAME']/text()")[0]
+            doctype = ishfolder.xpath("./ishfields/ishfield[@name='FDOCUMENTTYPE']/text()")[0]
+            print(" - %-15s (type = %s)" % (name, doctype))
+
+    def dir_folders(self):
+        parser = argparse.ArgumentParser(description="Get the subfolders of a directory",usage=argparse.SUPPRESS)
+        parser.add_argument('folder',action='store',help='A folder in repository',metavar='folder')
+        args = parser.parse_args(sys.argv[3:])
+        
+        # authenticate
+        self.authenticate()
+
+        # convert path to list
+        folder = args.folder
+        folderList = []
+        for item in folder.split('/'):
+            folderList.append(item)
+        lsclient = Client(self.hostname + 'Folder25.asmx?wsdl')
+        resp = lsclient.service.GetMetaData(self.token, 'Data', {'string':folderList}, '')
+        ishfolderref = self.getValueFromResponse(resp.psOutXMLFolderList, "//@ishfolderref", 'first')
+        resp = lsclient.service.GetSubFoldersByIshFolderRef(self.token, ishfolderref)
+        self.lsFolderPrintContents(resp.psOutXMLFolderList, folder)
+    
+    def lsFilesPrintContents(self, xmls):
+        guids = []
+        xmlb = xmls.encode('utf16')
+        tree = etree.fromstring(xmlb)
+        for ishobject in tree.xpath("//ishobject"):
+            guid = ishobject.xpath("./@ishref")[0]
+            guids.append(guid)
+        if len(guids) == 0:
+            raise SystemExit('No contents found in this directory')
+        ishtype = tree.xpath("//ishobject/@ishtype")[0]
+        # returns a list: [name, guid, ver]
+        topics = self.alphabetizeGuidsByTitle(guids, ishtype)
+        for topic in topics:
+            name = topic[0]
+            guid = topic[1]
+            ver  = topic[2]
+            print("%s | %s | %s" % (guid, ver, name))
+
+    def dir_files(self):
+        parser = argparse.ArgumentParser(description="List the contents of a directory",usage=argparse.SUPPRESS)
+        parser.add_argument('path',action='store',help='Path in repository',metavar='path')
+        args = parser.parse_args(sys.argv[3:])
+        
+        # authenticate
+        self.authenticate()
+
+        # convert path to list
+        path = args.path
+        pathList = []
+        for item in path.split('/'):
+            pathList.append(item)
+        lsclient = Client(self.hostname + 'Folder25.asmx?wsdl')
+        resp = lsclient.service.GetMetaData(self.token, 'Data', {'string':pathList}, '')
+        ishfolderref = self.getValueFromResponse(resp.psOutXMLFolderList, "//@ishfolderref", 'first')
+        resp = lsclient.service.GetContents(self.token, ishfolderref, '')
+        self.lsFilesPrintContents(resp.psOutXMLObjList)
+        
+if __name__ == '__main__':
+    SDL()
