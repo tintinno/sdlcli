@@ -4,8 +4,8 @@
 
 default:
   lang: en-US
-  releasedStatus: Generic-Released
-  draftStatus: Generic-In progress
+  releasedStatus: Released
+  draftStatus: Draft
 
 ##################################
 # metadata for publications
