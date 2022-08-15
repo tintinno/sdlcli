@@ -60,10 +60,11 @@ Management types:
 ```
 Currently, `sdlcli` supports 3 items you can manage or interact with.
 
-| mgmttype | Examples |
-| doc | Maps, Topics, Images |
-| pub | Publications |
-| dir | Directories |
+| mgmttype | Examples     |
+|----------|--------------|
+| doc      | Maps, Topics, Images |
+| pub      | Publications |
+| dir      | Directories  |
 
 ### Manage Topics
 
