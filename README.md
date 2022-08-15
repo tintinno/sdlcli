@@ -196,3 +196,7 @@ export TEST="MyOrg/MyProduct/Testing/tintinno"
    [tintinno@localhost]$
    ```
    The output lists GUID, version, and title.
+
+## Logs
+
+A log of each action is written to `~/.sdlcli/sdl.log`.
