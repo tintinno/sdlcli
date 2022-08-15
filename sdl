@@ -7,6 +7,7 @@ from zeep import Client
 from lxml import etree
 import subprocess
 import argparse
+import requests
 import getpass
 import base64
 import netrc
@@ -19,14 +20,15 @@ import os
 
 # unset http[s] proxies because these are the worst: if you're not on VPN, you
 # can't reach the repo anyway; if you are on VPN, you don't need to proxy this
-# traffic through the corporate proxy since it already routes through the VPN
+# traffic through the corporate proxy since the VPN already routes properly
 os.environ['http_proxy']  = ''
 os.environ['https_proxy'] = ''
 
 # we need to know the home directory so we can set some other variables
 HOME    = os.environ['HOME']
-LOGFILE = HOME + '/.sdlcms/sdl.log'
-MDFILE  = HOME + '/.sdlcms/metadata.yaml'
+SDLCLI  = HOME + '/.sdlcli'
+LOGFILE = SDLCLI + '/sdl.log'
+MDFILE  = SDLCLI + '/metadata.yaml'
 
 # record successful commands
 def writeLog(msg):
@@ -76,13 +78,14 @@ Management types:
 
         # when we create an object, load the metadata.yaml if it exists
         if not os.path.isfile(MDFILE):
-            raise SystemExit('Run the installation script `install.py`.')
-        with open(MDFILE,'r') as f:
-            mddata = yaml.load(f.read(), Loader=yaml.SafeLoader)
-        self.mddata = mddata
-        self.lang   = mddata['default']['lang']
-        self.releasedStatus = mddata['default']['releasedStatus']
-        self.draftStatus = mddata['default']['draftStatus']
+            print('Warning: No metadata file. Run `sdl setup`.')
+        else:
+            with open(MDFILE,'r') as f:
+                mddata = yaml.load(f.read(), Loader=yaml.SafeLoader)
+            self.mddata = mddata
+            self.lang   = mddata['default']['lang']
+            self.releasedStatus = mddata['default']['releasedStatus']
+            self.draftStatus = mddata['default']['draftStatus']
        
         # call the management-type functions
         if not hasattr(self, args.mgmttype):
@@ -94,16 +97,28 @@ Management types:
     
     # authenticate and store the token within the object so we can find it later
     def authenticate(self):
-        SDLRC = HOME + '/.sdlcms/.sdlrc'
-        with open(SDLRC,'r') as f:
-            auth = yaml.load(f.read(), Loader=yaml.SafeLoader)
+        SDLRC = SDLCLI + '/.sdlrc'
+        try:
+            with open(SDLRC,'r') as f:
+                auth = yaml.load(f.read(), Loader=yaml.SafeLoader)
+        except:
+            raise SystemExit("Failed to load authentication file. Did you run `sdl setup`?")
+        
         username = auth['user']
         password = auth['pass']
         hostname = auth['host']
         self.hostname = hostname
-        client = Client(self.hostname + 'Application25.asmx?wsdl')
-        resp = client.service.Login('InfoShareAuthor', username, password)
-        self.token = resp['psOutAuthContext']
+        try:
+            client = Client(self.hostname + 'Application25.asmx?wsdl')
+            resp = client.service.Login('InfoShareAuthor', username, password)
+            self.token = resp['psOutAuthContext']
+        # if we can't authenticate with zeep, perhaps we're not on VPN
+        except: 
+            print("Failed to authenticate. Did you run `sdl setup`?")
+            r = requests.get('http://' + hostname.split('/')[2])
+            if r.status_code != 200:
+                print("Failed to reach server. Are you on VPN?")
+            raise SystemExit("Failed to authenticate. Try running `sdl setup`.")
 
     # generic parse response
     def getValueFromResponse(self, xmls, xpath, number):
@@ -133,9 +148,17 @@ Management types:
 
     # TOP-LEVEL SETUP
     def setup(self):
-        if not os.path.isdir(HOME + '/.sdlcms'):
-            os.mkdir(HOME + '/.sdlcms')
-        SDLRC = HOME + '/.sdlcms/.sdlrc'
+        # if the .sdlcli directory doesn't exist, let's create it
+        if not os.path.isdir(SDLCLI):
+            print("Creating ~/.sdlcli directory.")
+            os.mkdir(SDLCLI)
+        # if there is no metadata.yaml file, download from github
+        if not os.path.isfile(MDFILE):
+            print("No metadata file. Downloading metadata.yaml from GitHub")
+            r = requests.get("https://raw.githubusercontent.com/tintinno/sdlcli/main/metadata.yaml")
+            with open(MDFILE,'w') as out:
+                out.write(r.text)
+        SDLRC = SDLCLI + '/.sdlrc'
         hostname = input("Enter the SDL URL [https://example.com/InfoShareWS/]: ")
         username = input("Enter your SDL username: ")
         password = getpass.getpass(prompt='Enter your SDL password: ', stream=None)
