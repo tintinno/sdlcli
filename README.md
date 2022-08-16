@@ -217,7 +217,4 @@ Metadata levels are usually `logical`, `version`, or `lng`.
      level: version
      desc: the part number for this publication 
    ```
-   If you do not add your customized metadata to `~/.sdlcli/metadata.yaml`, you
-   must use the `-l` / `--level` option to specify the metadata level. Metadata
-   levels are usually `logical`, `version`, or `lng`.
 
