@@ -1,6 +1,9 @@
 # sdlcli
 A command-line interface to an SDL Knowledge Center repository.
 
+[SDL Knowledge Center](https://docs.rws.com/787645/156929/sdl-tridion-docs-14/product-overview-and-architecture) 
+(rebranded as Tridion Docs) is a content management system for technical writers.
+
 ## Installation 
 
 1. Install `zeep` and `lxml`.
@@ -30,23 +33,6 @@ Enter your SDL username: tintinno
 Enter your SDL password:
 [tintinno@localhost]$
 ```
-
-2. If you customized your workflow, open `~/.sdlcli/metadata.yaml` and set the 
-   values for the default draft state and the default released state for topics.
-   Otherwise, leave them as they are.
-
-3. If you use customized SDL metadata, open `~/.sdlcli/metadata.yaml` and add 
-   the field name in uppercase and the metadata level in lowercase.
-
-   For example, if you've added an FPARTNUMBER field at the version level to track 
-   publication part numbers, add the following under the `pub` section. 
-   (The `desc` field is an optional description.)
-
-   ```
-   FPARTNUMBER:
-     level: version
-     desc: the part number for this publication 
-   ```
 
 ## Management Types
 
@@ -78,6 +64,8 @@ Commands:
     setmd       Set metadata for a document (topic,map,image)
     getxml      Get the XML of a document (topic,map)
 ```
+
+Run `sdl doc <command> -h` to see the arguments for each command.
 
 **Examples**
 
@@ -114,6 +102,7 @@ Commands:
     getbl       Get a list of GUIDs and versions in the baseline
     release     Release all topics in a publication version
 ```
+Run `sdl pub <command> -h` to see the arguments for each command.
 
 **Examples**
 
@@ -197,6 +186,38 @@ export TEST="MyOrg/MyProduct/Testing/tintinno"
    ```
    The output lists GUID, version, and title.
 
-## Logs
+## Log
 
 A log of each action is written to `~/.sdlcli/sdl.log`.
+
+## Metadata
+
+In SDL, metadata exists at specific levels: the logical level, the version level, and
+the language level. The logical level contains one or more versions; versions contain
+one or more languages. 
+
+The `metadata.yaml` file maps metadata fields to metadata levels. 
+If you do not add your customized metadata to `~/.sdlcli/metadata.yaml`, 
+you must use the `-l` / `--level` option to specify the metadata level. 
+Metadata levels are usually `logical`, `version`, or `lng`.
+
+1. If you customized your workflow, open `~/.sdlcli/metadata.yaml` and set the 
+   values for the default draft state and the default released state for topics.
+   Otherwise, leave them as they are.
+
+1. If you use customized SDL metadata, open `~/.sdlcli/metadata.yaml` and add 
+   the field name in uppercase and the metadata level in lowercase.
+
+   For example, if you've added an FPARTNUMBER field at the version level to track 
+   publication part numbers, add the following under the `pub` section. 
+   (The `desc` field is an optional description.)
+
+   ```
+   FPARTNUMBER:
+     level: version
+     desc: the part number for this publication 
+   ```
+   If you do not add your customized metadata to `~/.sdlcli/metadata.yaml`, you
+   must use the `-l` / `--level` option to specify the metadata level. Metadata
+   levels are usually `logical`, `version`, or `lng`.
+
