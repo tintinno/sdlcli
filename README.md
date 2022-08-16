@@ -16,7 +16,8 @@ pip3 install lxml
 2. Copy `sdl` into your $PATH.
 
 ```
-cp sdl ~/bin/
+git clone https://github.com/tintinno/sdlcli/
+cp sdlcli/sdl ~/bin/
 ```
 
 ## Setup
