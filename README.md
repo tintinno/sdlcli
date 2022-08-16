@@ -195,12 +195,13 @@ A log of each action is written to `~/.sdlcli/sdl.log`.
 
 In SDL, metadata exists at specific levels: the logical level, the version level, and
 the language level. The logical level contains one or more versions; versions contain
-one or more languages. 
+one or more languages. When you get or set metadata, you have to specify the level at
+which your metadata field exists using `-l` or `--level`. For most publications, maps
+and topics, metadata levels are either `logical`, `version`, or `lng`.
 
-The `metadata.yaml` file maps metadata fields to metadata levels. 
-If you do not add your customized metadata to `~/.sdlcli/metadata.yaml`, 
-you must use the `-l` / `--level` option to specify the metadata level. 
-Metadata levels are usually `logical`, `version`, or `lng`.
+If you don't want to specify the level every time (because, for example, the FTITLE is
+always on the logical level and only there), add your metadata fields and versions to
+`metadata.yaml`. This file maps metadata fields to metadata levels. 
 
 1. If you customized your workflow, open `~/.sdlcli/metadata.yaml` and set the 
    values for the default draft state and the default released state for topics.
@@ -216,6 +217,6 @@ Metadata levels are usually `logical`, `version`, or `lng`.
    ```
    FPARTNUMBER:
      level: version
-     desc: the part number for this publication 
+     desc: the part number for this version of the publication 
    ```
 
