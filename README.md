@@ -147,7 +147,13 @@ usage: sdl dir <options> <path>
 Options:
     folders     List the subfolders of a folder
     files       List the contents of a folder
+    all         List subfolders and contents of a folder
+    mkdir       Create a new folder
+    rmdir       Delete an empty folder
+    rename      Rename a folder
+    move        Move a folder to a new location
 ```
+
 When listing folders and files, it's often convenient to define bash variables for frequently used 
 locations rather than write out the full path each time.
 ```
