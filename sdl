@@ -301,8 +301,16 @@ Commands:
         xmls = resp['psOutXMLObjList']
         xmls = xmls.replace('<?xml version="1.0" encoding="utf-16"?>','')
         tree = etree.fromstring(xmls)
-        ext  = tree.xpath("//ishdata/@fileextension")[0]
-        encc = tree.xpath("//ishdata")[0].text
+        # prefer Default to Print resolutions
+        if 'png' in tree.xpath("//ishdata/@fileextension"):
+            ext = 'png'
+            encc = tree.xpath("//ishdata[@fileextension = 'png']")[0].text
+        elif 'jpg' in tree.xpath("//ishdata/@fileextension"):
+            ext = 'jpg'
+            encc = tree.xpath("//ishdata[@fileextension = 'jpg']")[0].text
+        else:
+            ext  = tree.xpath("//ishdata/@fileextension")[0]
+            encc = tree.xpath("//ishdata")[0].text
         bimg = base64.b64decode(encc)
         with open('%s.%s' % (outfile, ext), 'wb') as out:
             out.write(bimg)

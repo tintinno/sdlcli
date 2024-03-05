@@ -64,9 +64,13 @@ Commands:
     getmd       Get metadata for a document (topic,map,image)
     setmd       Set metadata for a document (topic,map,image)
     getxml      Get the XML of a document (topic,map)
+    getimg      Save an image to the file system (image)
+    getfile     Save a document (topic,map,image)
 ```
 
 Run `sdl doc <command> -h` to see the arguments for each command.
+
+You can use the long form (`--guid`) or short form (`-g`) of any argument.
 
 **Examples**
 
@@ -192,6 +196,16 @@ export TEST="MyOrg/MyProduct/Testing/tintinno"
    [tintinno@localhost]$
    ```
    The output lists GUID, version, and title.
+
+## Example Program 
+
+Using Linux pipes, you can quickly set the publication date to March 2024 for version 1 of every publication within a directory.
+
+```
+sdl dir files "$TEST/pub" | awk '{print $1}' | while read guid; do
+  sdl pub setmd -g "$guid" -v 1 -f FPUBPRINTDATE -n "March 2024"
+done
+```
 
 ## Log
 
